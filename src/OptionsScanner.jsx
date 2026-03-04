@@ -2,6 +2,26 @@ import { useState, useEffect, useCallback } from "react";
 
 const PROXY_BASE = "http://localhost:3001";
 const DEFAULT_TICKERS = ["AAPL", "VIX", "KO", "META", "AMZN", "XOM", "GM", "MCD"];
+const STORAGE_KEY = "options-scanner-tickers";
+
+async function loadSavedTickers() {
+  try {
+    const result = await window.storage.get(STORAGE_KEY);
+    if (result && result.value) {
+      const parsed = JSON.parse(result.value);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return DEFAULT_TICKERS;
+}
+
+async function saveTickers(tickers) {
+  try {
+    await window.storage.set(STORAGE_KEY, JSON.stringify(tickers));
+  } catch (e) {
+    console.warn("Failed to save tickers:", e);
+  }
+}
 
 async function fetchTicker(ticker) {
   const [stateRes, explainRes] = await Promise.all([
@@ -30,7 +50,6 @@ async function askClaude(prompt) {
     throw new Error(`Proxy returned non-JSON (HTTP ${res.status}). Is the proxy running on port 3001?`);
   }
 
-  // Surface API-level errors clearly
   if (data.error) {
     const msg = typeof data.error === "object"
       ? `${data.error.type}: ${data.error.message}`
@@ -44,19 +63,6 @@ async function askClaude(prompt) {
   return text;
 }
 
-// Exact schema from live API:
-// raw.data = {
-//   call_flow:    { regime, speculative_interest_score }
-//   derived:      { dist_to_gex_flip, distance_to_minus/plus_1sigma_price }
-//   expected_move:{ expected_move_pct_1d/1w/30d, levels:{...}, sigma_wings:{...} }
-//   gamma:        { flip:{dist,price}, flow_context:{...}, gamma_notional_per_1pct_move_usd,
-//                   structure:{max_gamma_strike, nearest_exp_gamma_notional_per_1pct_move_usd,
-//                              nearest_expiration_date, pct_gamma_expiring_nearest_expiry} }
-//   positioning:  { put_call:{call_oi,call_vol,pcr_oi,pcr_oi_change,pcr_volume,put_oi,put_vol},
-//                   skew:{put_call_iv_ratio_25delta, put_call_iv_spread, skew_reference_dte_days,
-//                         baselines:{put_call_iv_ratio_25delta_log, put_call_iv_spread}} }
-//   underlying:   { iv:{atm_iv, iv_1d_pct_chg, iv_rank, max_iv, min_iv}, price }
-// }
 function normalize(raw) {
   const d  = raw?.data ?? raw ?? {};
   const cf = d.call_flow    ?? {};
@@ -70,17 +76,12 @@ function normalize(raw) {
   const uiv = un.iv         ?? {};
 
   return {
-    // call_flow
     regime:       cf.regime ?? null,
     specScore:    cf.speculative_interest_score ?? null,
-
-    // underlying — primary IV source
     iv:           uiv.atm_iv ?? null,
     ivRank:       uiv.iv_rank ?? null,
     ivChg1d:      uiv.iv_1d_pct_chg ?? null,
     price:        un.price ?? null,
-
-    // expected_move
     em1d:         em.expected_move_pct_1d  ?? null,
     em1w:         em.expected_move_pct_1w  ?? null,
     em30d:        em.expected_move_pct_30d ?? null,
@@ -88,8 +89,6 @@ function normalize(raw) {
     emHigh:       em.levels?.price_plus_1sigma  ?? null,
     ivAtLow:      em.sigma_wings?.iv_at_minus_1sigma ?? null,
     ivAtHigh:     em.sigma_wings?.iv_at_plus_1sigma  ?? null,
-
-    // gamma
     gammaFlipDist:    gm.flip?.dist  ?? null,
     gammaFlipPrice:   gm.flip?.price ?? null,
     gammaNot1pct:     gm.gamma_notional_per_1pct_move_usd ?? null,
@@ -97,11 +96,7 @@ function normalize(raw) {
     nearestExpiry:    gm.structure?.nearest_expiration_date ?? null,
     pctGammaExpiring: gm.structure?.pct_gamma_expiring_nearest_expiry ?? null,
     gexVolRatio:      gm.flow_context?.gex_volume_ratio ?? null,
-
-    // derived
     distToGexFlip:    dv.dist_to_gex_flip ?? null,
-
-    // positioning - put/call
     callOI:    pc.call_oi  ?? null,
     putOI:     pc.put_oi   ?? null,
     callVol:   pc.call_vol ?? null,
@@ -110,13 +105,10 @@ function normalize(raw) {
     pcrVol:    pc.pcr_volume ?? null,
     pcrChg30d: pc.pcr_oi_change?.d30 ?? null,
     pcrChg60d: pc.pcr_oi_change?.d60 ?? null,
-
-    // positioning - skew
     skewRatio:    sk.put_call_iv_ratio_25delta  ?? null,
     skewSpread:   sk.put_call_iv_spread         ?? null,
     skewRefDte:   sk.skew_reference_dte_days    ?? null,
-
-    d, // raw sections for fallback/AI
+    d,
   };
 }
 
@@ -211,6 +203,20 @@ function SpecArc({ score }) {
   );
 }
 
+// ── Ticker Tag (pill in the manage bar) ──────────────────────────────────────
+function TickerTag({ ticker, onRemove }) {
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-100 group">
+      {ticker}
+      <button
+        onClick={() => onRemove(ticker)}
+        className="text-zinc-500 hover:text-red-400 transition-colors leading-none ml-0.5 text-[11px]"
+        title={`Remove ${ticker}`}
+      >×</button>
+    </span>
+  );
+}
+
 // ── Ticker Card ───────────────────────────────────────────────────────────────
 function TickerCard({ data, onSelect, selected }) {
   const { ticker, explain } = data;
@@ -231,7 +237,6 @@ function TickerCard({ data, onSelect, selected }) {
                  : "border-zinc-800 bg-zinc-900/80 hover:border-zinc-700"
       }`}
     >
-      {/* Header */}
       <div className="flex items-start justify-between mb-2">
         <div className="flex flex-col gap-1.5">
           <div className="flex items-baseline gap-2">
@@ -260,7 +265,6 @@ function TickerCard({ data, onSelect, selected }) {
         </div>
       </div>
 
-      {/* Expected move pills */}
       {(m.em1d !== null || m.em1w !== null) && (
         <div className="flex gap-1.5 flex-wrap mb-2">
           {m.em1d  && <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-amber-300">1d ±{(m.em1d*100).toFixed(1)}%</span>}
@@ -269,7 +273,6 @@ function TickerCard({ data, onSelect, selected }) {
         </div>
       )}
 
-      {/* Gamma section */}
       {(m.gammaFlipDist !== null || m.gammaNot1pct !== null) && (
         <Section>
           <div className="text-[10px] text-zinc-400 uppercase tracking-widest mb-1">Gamma</div>
@@ -288,7 +291,6 @@ function TickerCard({ data, onSelect, selected }) {
         </Section>
       )}
 
-      {/* Skew section */}
       {(m.skewRatio !== null || m.skewSpread !== null) && (
         <Section>
           <div className="text-[10px] text-zinc-400 uppercase tracking-widest mb-1">Skew {m.skewRefDte ? <span className="normal-case">({m.skewRefDte.toFixed(0)}d)</span> : ""}</div>
@@ -301,7 +303,6 @@ function TickerCard({ data, onSelect, selected }) {
         </Section>
       )}
 
-      {/* Positioning section */}
       {(m.callOI !== null || m.pcrOI !== null) && (
         <Section>
           <div className="text-[10px] text-zinc-400 uppercase tracking-widest mb-1">Positioning</div>
@@ -315,7 +316,6 @@ function TickerCard({ data, onSelect, selected }) {
         </Section>
       )}
 
-      {/* Explain blurb */}
       {explainText && (
         <p className="text-[11px] text-zinc-200 line-clamp-3 leading-relaxed border-t border-zinc-800 pt-2 mt-2">
           {explainText}
@@ -389,7 +389,9 @@ Cover: positioning regime read, gamma exposure implications, skew signals, key r
 
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function OptionsScanner() {
-  const [inputVal, setInputVal]         = useState(DEFAULT_TICKERS.join(", "));
+  const [tickers, setTickers]           = useState(DEFAULT_TICKERS);
+  const [addInput, setAddInput]         = useState("");
+  const [storageReady, setStorageReady] = useState(false);
   const [tickerData, setTickerData]     = useState([]);
   const [loading, setLoading]           = useState(false);
   const [errors, setErrors]             = useState({});
@@ -398,6 +400,15 @@ export default function OptionsScanner() {
   const [summarizing, setSummarizing]   = useState(false);
   const [summaryOpen, setSummaryOpen]   = useState(false);
   const [loadProgress, setLoadProgress] = useState(0);
+  const [saveStatus, setSaveStatus]     = useState(""); // "saved" | "saving" | ""
+
+  // Load saved tickers on mount
+  useEffect(() => {
+    loadSavedTickers().then(saved => {
+      setTickers(saved);
+      setStorageReady(true);
+    });
+  }, []);
 
   const scan = useCallback(async list => {
     setLoading(true); setTickerData([]); setErrors({}); setLoadProgress(0);
@@ -414,8 +425,44 @@ export default function OptionsScanner() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { scan(DEFAULT_TICKERS); }, []);
-  const handleScan = () => scan(inputVal.split(",").map(t => t.trim()).filter(Boolean));
+  // Auto-scan when storage is ready
+  useEffect(() => {
+    if (storageReady) scan(tickers);
+  }, [storageReady]);
+
+  const persistTickers = useCallback(async (newList) => {
+    setSaveStatus("saving");
+    await saveTickers(newList);
+    setSaveStatus("saved");
+    setTimeout(() => setSaveStatus(""), 2000);
+  }, []);
+
+  const handleAddTicker = () => {
+    const toAdd = addInput.split(",")
+      .map(t => t.trim().toUpperCase())
+      .filter(t => t.length > 0 && !tickers.includes(t));
+    if (toAdd.length === 0) { setAddInput(""); return; }
+    const newList = [...tickers, ...toAdd];
+    setTickers(newList);
+    persistTickers(newList);
+    setAddInput("");
+    scan(toAdd).then(() => {}); // scan only new ones, merge results
+  };
+
+  const handleRemoveTicker = useCallback((ticker) => {
+    const newList = tickers.filter(t => t !== ticker);
+    setTickers(newList);
+    setTickerData(prev => prev.filter(d => d.ticker !== ticker));
+    persistTickers(newList);
+    if (selected?.ticker === ticker) setSelected(null);
+  }, [tickers, selected, persistTickers]);
+
+  const handleRescan = () => scan(tickers);
+
+  // Add on Enter
+  const handleAddKeyDown = (e) => {
+    if (e.key === "Enter") handleAddTicker();
+  };
 
   const handleAISummary = async () => {
     setSummarizing(true); setSummaryOpen(true); setAiSummary("");
@@ -454,24 +501,62 @@ export default function OptionsScanner() {
         </div>
       </header>
 
+      {/* Ticker management bar */}
       <div className="border-b border-zinc-800 px-6 py-3 bg-zinc-900/50">
-        <div className="max-w-7xl mx-auto flex items-center gap-3 flex-wrap">
-          <span className="text-zinc-300 text-xs uppercase tracking-widest">Tickers</span>
-          <input className="flex-1 min-w-60 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm font-mono text-white placeholder-zinc-300 focus:outline-none focus:border-amber-400/60 transition-colors"
-            value={inputVal} onChange={e => setInputVal(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && handleScan()} placeholder="SPY, QQQ, AAPL, ..." />
-          <button onClick={handleScan} disabled={loading}
-            className="px-4 py-1.5 bg-zinc-700 hover:bg-zinc-400 disabled:opacity-50 rounded-lg text-sm transition-colors">
-            {loading ? `${loadProgress}%` : "Scan →"}
-          </button>
-          {loading && (
-            <div className="flex items-center gap-2">
-              <div className="h-1 w-32 bg-zinc-800 rounded-full overflow-hidden">
-                <div className="h-full bg-amber-400 transition-all duration-300" style={{ width: `${loadProgress}%` }} />
+        <div className="max-w-7xl mx-auto space-y-2">
+          {/* Tag row */}
+          <div className="flex flex-wrap gap-1.5 items-center min-h-[28px]">
+            {tickers.map(t => (
+              <TickerTag key={t} ticker={t} onRemove={handleRemoveTicker} />
+            ))}
+            {tickers.length === 0 && (
+              <span className="text-xs text-zinc-500 italic">No tickers — add some below</span>
+            )}
+            {saveStatus && (
+              <span className={`text-[10px] ml-2 transition-opacity ${saveStatus === "saved" ? "text-emerald-400" : "text-zinc-400"}`}>
+                {saveStatus === "saved" ? "✓ saved" : "saving..."}
+              </span>
+            )}
+          </div>
+
+          {/* Controls row */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-zinc-400 text-xs uppercase tracking-widest shrink-0">Add</span>
+            <input
+              className="flex-1 min-w-40 max-w-xs bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm font-mono text-white placeholder-zinc-500 focus:outline-none focus:border-amber-400/60 transition-colors"
+              value={addInput}
+              onChange={e => setAddInput(e.target.value)}
+              onKeyDown={handleAddKeyDown}
+              placeholder="SPY, QQQ, ..."
+            />
+            <button
+              onClick={handleAddTicker}
+              disabled={!addInput.trim()}
+              className="px-3 py-1.5 bg-amber-400/20 hover:bg-amber-400/30 border border-amber-400/30 disabled:opacity-30 rounded-lg text-xs text-amber-300 transition-colors font-mono"
+            >
+              + Add
+            </button>
+            <div className="w-px h-4 bg-zinc-700 mx-1" />
+            <button
+              onClick={handleRescan}
+              disabled={loading || tickers.length === 0}
+              className="px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 rounded-lg text-xs transition-colors font-mono flex items-center gap-1.5"
+            >
+              {loading ? (
+                <>
+                  <span className="inline-block w-2.5 h-2.5 border border-zinc-300 border-t-transparent rounded-full animate-spin"/>
+                  {loadProgress}%
+                </>
+              ) : "↻ Rescan"}
+            </button>
+            {loading && (
+              <div className="flex items-center gap-2">
+                <div className="h-1 w-24 bg-zinc-800 rounded-full overflow-hidden">
+                  <div className="h-full bg-amber-400 transition-all duration-300" style={{ width: `${loadProgress}%` }} />
+                </div>
               </div>
-              <span className="text-xs text-zinc-300">{loadProgress}%</span>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
 
@@ -485,7 +570,7 @@ export default function OptionsScanner() {
         {tickerData.length === 0 && !loading && (
           <div className="text-center py-20 text-zinc-400">
             <div className="display text-5xl mb-3">NO DATA</div>
-            <p className="text-sm">Enter tickers above and hit Scan</p>
+            <p className="text-sm">Add tickers above and they'll be saved for next time</p>
           </div>
         )}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
