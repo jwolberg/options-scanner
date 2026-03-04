@@ -197,7 +197,7 @@ function SpecArc({ score }) {
         <path d="M 4 26 A 20 20 0 0 1 44 26" fill="none" stroke={color} strokeWidth="4"
           strokeLinecap="round" strokeDasharray={`${dash * 2.15} 999`}/>
       </svg>
-      <span className="text-[9px] text-zinc-300 -mt-1">spec</span>
+      <span className="text-[9px] text-zinc-300 -mt-1">Call Speculation</span>
       <span className="text-[10px] font-mono font-bold" style={{ color }}>{(pct * 100).toFixed(0)}%</span>
     </div>
   );
