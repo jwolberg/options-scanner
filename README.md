@@ -1,6 +1,8 @@
 # Options Scanner
 
-A real-time options market dashboard that surfaces gamma exposure, volatility structure, skew, and positioning data across multiple tickers — then lets you ask Claude AI for trade ideas and market reads, all in one place.
+An options market dashboard that surfaces gamma exposure, volatility structure, skew, and positioning data across multiple tickers — then lets you ask Claude AI for trade ideas and market reads, all in one place.
+
+<img width="1440" height="820" alt="Screenshot 2026-03-03 at 9 25 00 PM" src="https://github.com/user-attachments/assets/fb854f58-f471-4983-bf87-49e662ce4c19" />
 
 ## What it does
 
@@ -15,6 +17,9 @@ Most options data tools show you raw numbers in a table. This dashboard turns th
 - **AI market summary** — one button reads all loaded tickers simultaneously and returns a cross-market pulse with the top setups and key risks
 
 ---
+<img width="1457" height="810" alt="Screenshot 2026-03-03 at 9 25 56 PM" src="https://github.com/user-attachments/assets/d6234cce-d072-4a55-bedc-66ff82c53861" />
+
+<img width="1387" height="771" alt="Screenshot 2026-03-03 at 9 45 57 PM" src="https://github.com/user-attachments/assets/37b31fe5-c639-4bda-a84b-0a672c819078" />
 
 ## Platform & OS requirements
 
