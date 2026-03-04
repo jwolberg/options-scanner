@@ -6,9 +6,9 @@ const STORAGE_KEY = "options-scanner-tickers";
 
 async function loadSavedTickers() {
   try {
-    const result = await window.storage.get(STORAGE_KEY);
-    if (result && result.value) {
-      const parsed = JSON.parse(result.value);
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) return parsed;
     }
   } catch {}
@@ -17,7 +17,7 @@ async function loadSavedTickers() {
 
 async function saveTickers(tickers) {
   try {
-    await window.storage.set(STORAGE_KEY, JSON.stringify(tickers));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(tickers));
   } catch (e) {
     console.warn("Failed to save tickers:", e);
   }
