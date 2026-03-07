@@ -113,25 +113,75 @@ function normalize(raw) {
 }
 
 // ── UI helpers ────────────────────────────────────────────────────────────────
-function Bar({ label, value, max, posColor, negColor, fmt }) {
+function Bar({ 
+  label,
+  value,
+  min,
+  max,
+  neutral = 0,
+  invert = false,
+  posColor,
+  negColor,
+  fmt,
+}) {
   if (value === null || value === undefined) return null;
-  const absMax = max ?? (Math.abs(value) * 2 || 1);
-  const pct    = Math.min(Math.abs(value) / absMax, 1) * 100;
-  const isPos  = value >= 0;
-  const bar    = isPos ? (posColor ?? "bg-emerald-400") : (negColor ?? "bg-red-400");
-  const text   = isPos ? "text-emerald-300" : "text-red-300";
+
+  const delta = value - neutral;
+  const signed = invert ? -delta : delta;
+
+  const positiveSpan = Math.max((max ?? neutral) - neutral, 0.0001);
+  const negativeSpan = Math.max(neutral - (min ?? neutral), 0.0001);
+
+  const isPos = signed > 0;
+  const isNeutral = signed === 0;
+
+  const pct = isNeutral
+    ? 0
+    : isPos
+      ? Math.min(Math.abs(delta) / positiveSpan, 1) * 50
+      : Math.min(Math.abs(delta) / negativeSpan, 1) * 50;
+
+  const barColor = isNeutral
+    ? "bg-zinc-600"
+    : isPos
+      ? (posColor ?? "bg-emerald-400")
+      : (negColor ?? "bg-red-400");
+
+  const textColor = isNeutral
+    ? "text-zinc-400"
+    : isPos
+      ? "text-emerald-300"
+      : "text-red-300";
+
   const display = fmt ? fmt(value) : value.toFixed(2);
+
   return (
     <div className="flex items-center gap-2 py-0.5">
       <span className="text-[11px] text-zinc-300 w-24 shrink-0">{label}</span>
-      <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-        <div className={`h-full rounded-full transition-all duration-700 ${bar}`} style={{ width: `${pct}%` }} />
+
+      <div className="relative flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+        {/* center marker */}
+        <div className="absolute left-1/2 top-0 bottom-0 w-px bg-zinc-600/80 -translate-x-1/2" />
+
+        {/* fill from center */}
+        {!isNeutral && (
+          <div
+            className={`absolute top-0 h-full rounded-full transition-all duration-700 ${barColor}`}
+            style={
+              isPos
+                ? { left: "50%", width: `${pct}%` }
+                : { right: "50%", width: `${pct}%` }
+            }
+          />
+        )}
       </div>
-      <span className={`text-[11px] font-mono w-16 text-right ${text}`}>{display}</span>
+
+      <span className={`text-[11px] font-mono w-16 text-right ${textColor}`}>
+        {display}
+      </span>
     </div>
   );
 }
-
 function Row({ label, value, color, dim }) {
   if (value === null || value === undefined) return null;
   return (
@@ -290,16 +340,33 @@ function TickerCard({ data, onSelect, selected }) {
           )}
         </Section>
       )}
-
+    
       {(m.skewRatio !== null || m.skewSpread !== null) && (
         <Section>
           <div className="text-[10px] text-zinc-400 uppercase tracking-widest mb-1">Skew {m.skewRefDte ? <span className="normal-case">({m.skewRefDte.toFixed(0)}d)</span> : ""}</div>
-          <Bar label="P/C IV Ratio" value={m.skewRatio} min={0.2}  max={3}
-            posColor="bg-red-400" negColor="bg-emerald-400"
-            fmt={v => v.toFixed(3)} />
-          <Bar label="P/C IV Spread" value={m.skewSpread} min={-0.5} max={0.5}
-            posColor="bg-red-400" negColor="bg-emerald-400"
-            fmt={v => `${v > 0 ? "+" : ""}${v.toFixed(4)}`} />
+          <Bar
+            label="P/C IV Ratio"
+            value={m.skewRatio}
+            min={0.2}
+            max={2}
+            neutral={1}
+            invert
+            posColor="bg-red-400"
+            negColor="bg-emerald-400"
+            fmt={v => v.toFixed(2)}
+          />
+
+          <Bar
+            label="P-C IV Spread"
+            value={m.skewSpread}
+            min={-0.8}
+            max={0.8}
+            neutral={0}
+            invert
+            posColor="bg-red-400"
+            negColor="bg-emerald-400"
+            fmt={v => `${v > 0 ? "+" : ""}${v.toFixed(3)}`}
+          />
         </Section>
       )}
 
