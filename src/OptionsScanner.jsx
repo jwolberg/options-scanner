@@ -96,7 +96,7 @@ function normalize(raw) {
     nearestExpiry:    gm.structure?.nearest_expiration_date ?? null,
     pctGammaExpiring: gm.structure?.pct_gamma_expiring_nearest_expiry ?? null,
     gexVolRatio:      gm.flow_context?.gex_volume_ratio ?? null,
-    distToGexFlip:    dv.dist_to_gex_flip ?? null,
+    distToGexFlip:    dv.dist_to_gex_flip_pct ?? null,
     callOI:    pc.call_oi  ?? null,
     putOI:     pc.put_oi   ?? null,
     callVol:   pc.call_vol ?? null,
@@ -267,9 +267,9 @@ function TickerCard({ data, onSelect, selected }) {
 
       {(m.em1d !== null || m.em1w !== null) && (
         <div className="flex gap-1.5 flex-wrap mb-2">
-          {m.em1d  && <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-amber-300">1d ±{(m.em1d*100).toFixed(1)}%</span>}
-          {m.em1w  && <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-amber-300/70">1w ±{(m.em1w*100).toFixed(1)}%</span>}
-          {m.em30d && <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-amber-300/50">30d ±{(m.em30d*100).toFixed(1)}%</span>}
+          {m.em1d  && <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-amber-300">1d ±{(m.em1d).toFixed(1)}%</span>}
+          {m.em1w  && <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-amber-300/70">1w ±{(m.em1w).toFixed(1)}%</span>}
+          {m.em30d && <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-amber-300/50">30d ±{(m.em30d).toFixed(1)}%</span>}
         </div>
       )}
 
@@ -294,10 +294,10 @@ function TickerCard({ data, onSelect, selected }) {
       {(m.skewRatio !== null || m.skewSpread !== null) && (
         <Section>
           <div className="text-[10px] text-zinc-400 uppercase tracking-widest mb-1">Skew {m.skewRefDte ? <span className="normal-case">({m.skewRefDte.toFixed(0)}d)</span> : ""}</div>
-          <Bar label="P/C IV Ratio" value={m.skewRatio} max={3}
+          <Bar label="P/C IV Ratio" value={m.skewRatio} min={0.2}  max={3}
             posColor="bg-red-400" negColor="bg-emerald-400"
             fmt={v => v.toFixed(3)} />
-          <Bar label="P/C IV Spread" value={m.skewSpread} max={0.3}
+          <Bar label="P/C IV Spread" value={m.skewSpread} min={-0.5} max={0.5}
             posColor="bg-red-400" negColor="bg-emerald-400"
             fmt={v => `${v > 0 ? "+" : ""}${v.toFixed(4)}`} />
         </Section>
