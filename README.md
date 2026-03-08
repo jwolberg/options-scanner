@@ -44,6 +44,9 @@ Most options data tools show you raw numbers in a table. This dashboard turns th
 | `TV_API_KEY` | [tradingvolatility.net](https://tradingvolatility.net) | Yes — for market data |
 | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) | No — AI features disabled without it |
 
+If no TV_API_KEY is provided the app will run in demo mode with limited tickers.
+
+If no ANTHROPIC_API_KEY is provided the AI analysis panel is disabled.
 ---
 
 ## Setup
@@ -59,6 +62,10 @@ cp .env.example .env
 # 3. Start everything (proxy + Vite dev server)
 npm start
 ```
+This launches:
+
+Vite dev server → localhost:5173
+Proxy server → localhost:3001
 
 Then open **http://localhost:5173** in your browser.
 
@@ -67,11 +74,19 @@ Then open **http://localhost:5173** in your browser.
 ## How it works
 
 ```
-Browser (React, :5173)
-    │
-    ├── GET  /tv/tickers/:ticker         ──► proxy.js (:3001) ──► tradingvolatility.net
-    ├── GET  /tv/tickers/:ticker/explain ──► proxy.js (:3001) ──► tradingvolatility.net
-    └── POST /anthropic                  ──► proxy.js (:3001) ──► api.anthropic.com
+Browser (React)
+localhost:5173
+     │
+     │  GET /tv/*
+     ▼
+Proxy Server (Express)
+localhost:3001
+     │
+     ├── Trading Volatility API
+     │       stocks.tradingvolatility.net
+     │
+     └── Anthropic API
+             api.anthropic.com
 ```
 
 The proxy (`proxy.js`) runs on port 3001 and sits between the browser and both external APIs. This means your API keys never touch the browser — they stay server-side in `.env` — and CORS is handled automatically.
@@ -93,16 +108,20 @@ The proxy (`proxy.js`) runs on port 3001 and sits between the browser and both e
 
 ```
 options-scanner/
-├── proxy.js                # Express proxy server (runs on :3001)
-├── index.html              # HTML entry point
-├── vite.config.js          # Vite config (proxies /tv and /anthropic to :3001)
-├── package.json
-├── .env.example            # Copy to .env and fill in your keys
-└── src/
-    ├── main.jsx            # React entry point
-    └── OptionsScanner.jsx  # Main dashboard component
-```
 
+├── proxy/
+│   └── server.js            # Express proxy server (:3001)
+│
+├── src/
+│   ├── main.jsx             # React entry
+│   └── OptionsScanner.jsx   # Dashboard UI
+│
+├── index.html
+├── vite.config.js
+├── package.json
+├── .env.example
+└── README.md
+```
 
 ## Error Messages
 
