@@ -1,0 +1,32 @@
+.key-input {
+    background: #27272a;           /* dark gray */
+    color: #f4f4f5;                /* light text so bullets are visible */
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 0.5rem;
+    padding: 0.375rem 0.625rem;
+    font-size: 0.9rem;
+    line-height: 1.2;
+    outline: none;
+    box-shadow: none;
+    -webkit-text-security: disc;   /* makes secure typing clearly visible in WebKit */
+  }
+  
+  .key-input::placeholder {
+    color: #94a3b8;
+  }
+  
+  .key-input:focus {
+    border-color: rgba(251, 191, 36, 0.45);
+    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.2);
+  }
+
+  @keyframes shake {
+    0%,100% { transform: translateX(0) }
+    25% { transform: translateX(-3px) }
+    75% { transform: translateX(3px) }
+  }
+  
+  .input-error {
+    animation: shake 0.3s;
+    border-color: #f59e0b;
+  }

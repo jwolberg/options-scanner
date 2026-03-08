@@ -1,36 +1,143 @@
 require("dotenv").config();
-console.log("[env] loaded from:", require("path").resolve(".env"));
-console.log
-console.log("[env] ANTHROPIC_API_KEY:", process.env.ANTHROPIC_API_KEY ? "found" : "NOT FOUND");
+
+const path = require("path");
 const express = require("express");
 const cors = require("cors");
+const fs = require("fs");
+console.log("[env] loaded from:", require("path").resolve(".env"));
+console.log("[env] ANTHROPIC_API_KEY:", process.env.ANTHROPIC_API_KEY ? "found" : "NOT FOUND");
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
-const TV_API_KEY      = process.env.TV_API_KEY || "";
-const TV_DEMO = (process.env.TV_DEMO || "").trim() === "1";
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
-const TV_BASE         = "https://stocks.tradingvolatility.net/api/v2";
+const TV_BASE  = "https://stocks.tradingvolatility.net/api/v2";
+const ENV_PATH = path.resolve(".env");
+
+let TV_API_KEY      = process.env.TV_API_KEY || "";
+let ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
+let TV_DEMO = (process.env.TV_DEMO || "").trim() === "1";
+
 console.log("[config] TV_DEMO Mode:", TV_DEMO ? "Demo mode ON. Tickers limited" : "OFF (valid TV_API_KEY required)");
+
 function isPlaceholderKey(k) {
   const v = (k || "").trim().toLowerCase();
-  return !v || v === "your_tv_api_key_here…";
+  return (
+    !v ||
+    v === "your_tv_api_key_here…" ||
+    v === "your_tv_api_key_here" ||
+    v.endsWith("…")
+  );
 }
 
-// ── Health check ──────────────────────────────────────────────────────────────
-app.get("/", (req, res) => {
+function hasRealTvKey(k) {
+  return !isPlaceholderKey(k);
+}
+
+function maskKey(key) {
+  if (!key) return null;
+  if (key.length <= 8) return "••••••••";
+  return `••••${key.slice(-3)}`;
+}
+
+function upsertEnvFile(updates) {
+  let content = "";
+  if (fs.existsSync(ENV_PATH)) {
+    content = fs.readFileSync(ENV_PATH, "utf8");
+  }
+
+  const lines = content ? content.split(/\r?\n/) : [];
+  const map = new Map();
+
+  for (const line of lines) {
+    const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
+    if (m) map.set(m[1], m[2]);
+  }
+
+  for (const [k, v] of Object.entries(updates)) {
+    map.set(k, v);
+  }
+
+  const out = Array.from(map.entries())
+    .map(([k, v]) => `${k}=${v}`)
+    .join("\n") + "\n";
+
+  fs.writeFileSync(ENV_PATH, out, "utf8");
+}
+
+console.log(
+  "[config] TV_DEMO Mode:",
+  TV_DEMO ? "Demo mode ON. Tickers limited" : "OFF (valid TV_API_KEY required)"
+);
+
+// health
+app.get("/", (_req, res) => {
   const tvMode = hasRealTvKey(TV_API_KEY) ? "✓ set" : "DEMO MODE";
 
   res.json({
     status: "ok",
     keys: {
-      tv:        tvMode,
+      tv: tvMode,
       anthropic: ANTHROPIC_API_KEY ? "✓ set" : "MISSING — AI disabled",
     },
   });
 });
+
+// key status
+app.get("/keys/status", (_req, res) => {
+
+  const tvActive = hasRealTvKey(TV_API_KEY);
+
+  res.json({
+    tv: {
+      active: tvActive,
+      invalid: TV_API_KEY && !tvActive,
+      masked: TV_API_KEY ? maskKey(TV_API_KEY) : null
+    },
+    anthropic: {
+      active: !!ANTHROPIC_API_KEY,
+      masked: ANTHROPIC_API_KEY ? maskKey(ANTHROPIC_API_KEY) : null
+    }
+  });
+});
+
+// save keys
+app.post("/keys", async (req, res) => {
+  try {
+    const { tv, anthropic } = req.body || {};
+
+    // Validate TV key
+    if (tv) {
+      try {
+        const test = await fetch(`${TV_BASE}/tickers/AAPL`, {
+          headers: { Authorization: `Bearer ${tv}` }
+        });
+
+        if (test.status !== 200) {
+          return res.status(400).json({
+            error: "Invalid Trading Volatility API key"
+          });
+        }
+
+        TV_API_KEY = tv;
+      } catch {
+        return res.status(500).json({
+          error: "Unable to validate Trading Volatility key"
+        });
+      }
+    }
+
+    if (anthropic) {
+      ANTHROPIC_API_KEY = anthropic;
+    }
+
+    res.json({ ok: true });
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 // ── Trading Volatility proxy ──────────────────────────────────────────────────
 app.get("/tv/*", async (req, res) => {

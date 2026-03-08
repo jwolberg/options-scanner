@@ -469,6 +469,45 @@ export default function OptionsScanner() {
   const [loadProgress, setLoadProgress] = useState(0);
   const [saveStatus, setSaveStatus]     = useState(""); // "saved" | "saving" | ""
 
+  // ── Key management ──
+  const [keyStatus, setKeyStatus]   = useState({ tv: null, anthropic: null }); // null=unknown
+  const [tvDraft, setTvDraft]       = useState("");
+  const [anthDraft, setAnthDraft]   = useState("");
+  const [keysSaving, setKeysSaving] = useState(false);
+  const [keysError, setKeysError]   = useState(null);
+
+  const fetchKeyStatus = useCallback(async () => {
+    try {
+      const r = await fetch(`${PROXY_BASE}/keys/status`);
+      const d = await r.json();
+      setKeyStatus(d);
+    } catch { /* proxy not up yet */ }
+  }, []);
+
+  const saveKeys = async () => {
+    const payload = {};
+    if (tvDraft.trim())   payload.tv        = tvDraft.trim();
+    if (anthDraft.trim()) payload.anthropic = anthDraft.trim();
+    if (!Object.keys(payload).length) return;
+    setKeysSaving(true);
+    setKeysError(null);
+    try {
+      const r = await fetch(`${PROXY_BASE}/keys`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      await fetchKeyStatus();
+      setTvDraft("");
+      setAnthDraft("");
+    } catch (e) {
+      setKeysError(e.message);
+    } finally {
+      setKeysSaving(false);
+    }
+  };
+
   // Load saved tickers on mount
   useEffect(() => {
     loadSavedTickers().then(saved => {
@@ -476,6 +515,10 @@ export default function OptionsScanner() {
       setStorageReady(true);
     });
   }, []);
+
+  useEffect(() => {
+    fetchKeyStatus();
+  }, [fetchKeyStatus]);
 
   const scan = useCallback(async list => {
     setLoading(true); setTickerData([]); setErrors({}); setLoadProgress(0);
@@ -555,18 +598,117 @@ export default function OptionsScanner() {
       `}</style>
       <div className="scan-line" />
 
-      <header className="border-b border-zinc-800 px-6 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between flex-wrap gap-4">
-          <div>
-            <h1 className="display text-4xl font-black text-white tracking-tight">OPTIONS <span className="text-amber-400">SCANNER</span></h1>
-            <p className="text-xs text-zinc-300 mt-0.5">Trading Volatility API + Claude AI</p>
+      <header className="border-b border-zinc-800 py-4">
+  <div className="max-w-7xl mx-auto px-6 flex items-center justify-between flex-wrap gap-4">
+    <div>
+      <h1 className="display text-4xl font-black text-white tracking-tight">
+        OPTIONS <span className="text-amber-400">SCANNER</span>
+      </h1>
+      <p className="text-xs text-zinc-300 mt-0.5">Trading Volatility API + Claude AI</p>
+    </div>
+
+    <button
+      onClick={handleAISummary}
+      disabled={summarizing || tickerData.length === 0}
+      className="px-4 py-2 rounded-lg bg-amber-400 text-black text-sm font-bold hover:bg-amber-300 disabled:opacity-40 transition-all flex items-center gap-2"
+    >
+      {summarizing ? (
+        <>
+          <span className="inline-block w-3 h-3 border-2 border-black border-t-transparent rounded-full animate-spin" />
+          Scanning...
+        </>
+      ) : (
+        "⚡ AI Market Summary"
+      )}
+    </button>
+  </div>
+
+  {/* API key subrow */}
+  <div
+    className="mt-4 border-t border-white/[0.04]"
+    style={{ background: "rgba(0,0,0,0.22)" }}
+  >
+    <div className="max-w-7xl mx-auto px-6 py-2 flex items-center gap-4 flex-wrap">
+      {/* TV Key */}
+      <div className="flex items-center gap-2">
+        <span className="text-[0.9rem] tracking-[0.18em] text-slate-400 uppercase shrink-0">TV</span>
+        {keyStatus.tv?.active ? (
+          <div className="flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
+            <span className="text-[1.0rem] text-slate-400 font-mono">{keyStatus.tv.masked}</span>
+            <span className="text-[0.9rem] px-1.5 py-0.5 rounded border border-emerald-500/25 text-emerald-500 bg-emerald-500/[0.06] tracking-wider">
+              FULL ACCESS
+            </span>
           </div>
-          <button onClick={handleAISummary} disabled={summarizing || tickerData.length === 0}
-            className="px-4 py-2 rounded-lg bg-amber-400 text-black text-sm font-bold hover:bg-amber-300 disabled:opacity-40 transition-all flex items-center gap-2">
-            {summarizing ? <><span className="inline-block w-3 h-3 border-2 border-black border-t-transparent rounded-full animate-spin"/>Scanning...</> : "⚡ AI Market Summary"}
-          </button>
-        </div>
-      </header>
+        ) : keyStatus.tv?.invalid ? (
+          <div className="flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />
+            <span className="text-[1.0rem] text-slate-400 font-mono">{keyStatus.tv.masked}</span>
+            <span className="text-[0.9rem] px-1.5 py-0.5 rounded border border-amber-500/25 text-amber-500 bg-amber-500/[0.06] tracking-wider">
+              INVALID KEY
+            </span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-slate-400 inline-block" />
+            <span className="text-[0.9rem] text-slate-400">demo only</span>
+          </div>
+        )}
+      </div>
+
+      <div className="h-4 w-px bg-white/[0.06] shrink-0" />
+
+      {/* Anthropic Key */}
+      <div className="flex items-center gap-2">
+        <span className="text-[0.9rem] tracking-[0.18em] text-slate-400 uppercase shrink-0">AI</span>
+        {keyStatus.anthropic?.active ? (
+          <div className="flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse inline-block" />
+            <span className="text-[1.0rem] text-slate-400 font-mono">{keyStatus.anthropic.masked}</span>
+            <span className="text-[0.9rem] px-1.5 py-0.5 rounded border border-amber-500/25 text-amber-600 bg-amber-500/[0.06] tracking-wider">
+              ENABLED
+            </span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-slate-400 inline-block" />
+            <span className="text-[0.9rem] text-slate-400">ai disabled</span>
+          </div>
+        )}
+      </div>
+
+      <div className="h-4 w-px bg-white/[0.06] shrink-0" />
+
+      {/* Key inputs */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <input
+          type="password"
+          value={tvDraft}
+          onChange={e => setTvDraft(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && saveKeys()}
+          placeholder="TV key…"
+          className="key-input w-32"
+        />
+        <input
+          type="password"
+          value={anthDraft}
+          onChange={e => setAnthDraft(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && saveKeys()}
+          placeholder="Anthropic key…"
+          className="key-input w-40"
+        />
+        <button
+          onClick={saveKeys}
+          disabled={keysSaving || (!tvDraft.trim() && !anthDraft.trim())}
+          className="text-[0.9rem] px-2.5 py-1.5 rounded border border-white/[0.08] text-slate-400 hover:border-amber-400/40 hover:text-amber-400 transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer bg-transparent tracking-wider"
+        >
+          {keysSaving ? "SAVING…" : "SET"}
+        </button>
+        {keysError && <span className="text-[0.9rem] text-red-500">✗ {keysError}</span>}
+      </div>
+    </div>
+  </div>
+</header>
 
       {/* Ticker management bar */}
       <div className="border-b border-zinc-800 px-6 py-3 bg-zinc-900/50">
@@ -585,7 +727,7 @@ export default function OptionsScanner() {
               </span>
             )}
           </div>
-
+            
           {/* Controls row */}
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-zinc-400 text-xs uppercase tracking-widest shrink-0">Add</span>
@@ -675,3 +817,5 @@ export default function OptionsScanner() {
     </div>
   );
 }
+
+
