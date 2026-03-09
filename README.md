@@ -2,7 +2,7 @@
 
 An options market dashboard that surfaces gamma exposure, volatility structure, skew, and positioning data across multiple tickers — then lets you ask Claude AI for trade ideas and market reads, all in one place.
 
-<img width="1440" height="820" alt="Screenshot 2026-03-03 at 9 25 00 PM" src="https://github.com/user-attachments/assets/fb854f58-f471-4983-bf87-49e662ce4c19" />
+<img width="1181" height="815" alt="Screenshot 2026-03-09 at 11 39 01 AM" src="https://github.com/user-attachments/assets/0963f0ff-e48c-4b4b-aeda-1fccc9fd108a" />
 
 ## What it does
 
