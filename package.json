@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "description": "Options Scanner with Trading Volatility API + Claude AI",
   "scripts": {
-    "proxy": "node proxy/server.js",
     "dev": "vite",
+    "proxy": "node proxy/server.js",
     "start": "concurrently \"npm run proxy\" \"npm run dev\"",
     "build": "vite build"
   },

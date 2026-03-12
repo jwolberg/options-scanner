@@ -31,6 +31,14 @@ async function fetchTicker(ticker) {
   return { ticker, raw: stateRes, explain: explainRes };
 }
 
+function reorderList(list, fromIndex, toIndex) {
+  const copy = [...list];
+  const [moved] = copy.splice(fromIndex, 1);
+  copy.splice(toIndex, 0, moved);
+  return copy;
+}
+
+
 async function askClaude(prompt) {
   const res = await fetch(`${PROXY_BASE}/anthropic`, {
     method: "POST",
@@ -206,13 +214,13 @@ function OIBar({ callOI, putOI }) {
   return (
     <div className="py-1">
       <div className="flex justify-between text-[10px] text-zinc-300 mb-1">
-        <span className="text-emerald-400/70">▲ {fmt(callOI)} calls</span>
+        <span className="text-emerald-300">▲ {fmt(callOI)} calls</span>
         <span>OI split</span>
-        <span className="text-red-400/70">puts {fmt(putOI)} ▼</span>
+        <span className="text-red-300">puts {fmt(putOI)} ▼</span>
       </div>
       <div className="flex h-2 rounded-full overflow-hidden">
-        <div className="bg-emerald-500/60 transition-all duration-700" style={{ width: `${callPct}%` }} />
-        <div className="bg-red-500/60 flex-1 transition-all duration-700" />
+        <div className="bg-emerald-500/80 transition-all duration-700" style={{ width: `${callPct}%` }} />
+        <div className="bg-red-500/80 flex-1 transition-all duration-700" />
       </div>
     </div>
   );
@@ -254,15 +262,38 @@ function SpecArc({ score }) {
 }
 
 // ── Ticker Tag (pill in the manage bar) ──────────────────────────────────────
-function TickerTag({ ticker, onRemove }) {
+function TickerTag({ ticker, onRemove, onDragStart, onDragOver, onDrop, dragging }) {
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-100 group">
+    <span
+      draggable
+      onDragStart={() => onDragStart(ticker)}
+      onDragOver={(e) => {
+        e.preventDefault();
+        onDragOver(ticker);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDrop(ticker);
+      }}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-mono text-zinc-100 group cursor-move select-none transition-all ${
+        dragging
+          ? "bg-amber-400/20 border-amber-400/40 opacity-60"
+          : "bg-zinc-800 border-zinc-700 hover:border-zinc-500"
+      }`}
+      title={`Drag to reorder ${ticker}`}
+    >
+      <span className="text-zinc-500 mr-0.5">⋮⋮</span>
       {ticker}
       <button
-        onClick={() => onRemove(ticker)}
-        className="text-zinc-500 hover:text-red-400 transition-colors leading-none ml-0.5 text-[11px]"
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove(ticker);
+        }}
+        className="text-zinc-500 hover:text-red-400 transition-colors leading-none ml-0.5 text-[11px] cursor-pointer"
         title={`Remove ${ticker}`}
-      >×</button>
+      >
+        ×
+      </button>
     </span>
   );
 }
@@ -476,6 +507,9 @@ export default function OptionsScanner() {
   const [keysSaving, setKeysSaving] = useState(false);
   const [keysError, setKeysError]   = useState(null);
 
+  const [dragTicker, setDragTicker] = useState(null);
+  const [dragOverTicker, setDragOverTicker] = useState(null);
+
   const fetchKeyStatus = useCallback(async () => {
     try {
       const r = await fetch(`${PROXY_BASE}/keys/status`);
@@ -520,18 +554,33 @@ export default function OptionsScanner() {
     fetchKeyStatus();
   }, [fetchKeyStatus]);
 
-  const scan = useCallback(async list => {
-    setLoading(true); setTickerData([]); setErrors({}); setLoadProgress(0);
-    const results = []; const errs = {};
+  const scan = useCallback(async (list) => {
+    setLoading(true);
+    setErrors({});
+    setLoadProgress(0);
+  
+    const collected = {};
+    const errs = {};
+  
     for (let i = 0; i < list.length; i++) {
       const t = list[i].toUpperCase().trim();
       try {
         const data = await fetchTicker(t);
-        results.push(data);
-        setTickerData([...results]);
-      } catch (e) { errs[t] = e.message; setErrors({...errs}); }
-      setLoadProgress(Math.round(((i+1)/list.length)*100));
+        collected[t] = data;
+  
+        const ordered = list
+          .map(sym => collected[sym])
+          .filter(Boolean);
+  
+        setTickerData(ordered);
+      } catch (e) {
+        errs[t] = e.message;
+        setErrors({ ...errs });
+      }
+  
+      setLoadProgress(Math.round(((i + 1) / list.length) * 100));
     }
+  
     setLoading(false);
   }, []);
 
@@ -546,6 +595,46 @@ export default function OptionsScanner() {
     setSaveStatus("saved");
     setTimeout(() => setSaveStatus(""), 2000);
   }, []);
+
+  const handleDragStart = useCallback((ticker) => {
+    setDragTicker(ticker);
+  }, []);
+  
+  const handleDragOver = useCallback((ticker) => {
+    if (ticker !== dragOverTicker) setDragOverTicker(ticker);
+  }, [dragOverTicker]);
+  
+  const handleDropTicker = useCallback((targetTicker) => {
+    if (!dragTicker || dragTicker === targetTicker) {
+      setDragTicker(null);
+      setDragOverTicker(null);
+      return;
+    }
+  
+    const fromIndex = tickers.indexOf(dragTicker);
+    const toIndex = tickers.indexOf(targetTicker);
+  
+    if (fromIndex === -1 || toIndex === -1) {
+      setDragTicker(null);
+      setDragOverTicker(null);
+      return;
+    }
+  
+    const newTickers = reorderList(tickers, fromIndex, toIndex);
+    setTickers(newTickers);
+  
+    setTickerData(prev => {
+      const byTicker = new Map(prev.map(item => [item.ticker, item]));
+      return newTickers.map(t => byTicker.get(t)).filter(Boolean);
+    });
+  
+    persistTickers(newTickers);
+  
+    setDragTicker(null);
+    setDragOverTicker(null);
+  }, [dragTicker, tickers, persistTickers]);
+
+
 
   const handleAddTicker = () => {
     const toAdd = addInput.split(",")
@@ -618,7 +707,7 @@ export default function OptionsScanner() {
           Scanning...
         </>
       ) : (
-        "⚡ AI Market Summary"
+        "⚡ Market Summary"
       )}
     </button>
   </div>
@@ -714,9 +803,24 @@ export default function OptionsScanner() {
       <div className="border-b border-zinc-800 px-6 py-3 bg-zinc-900/50">
         <div className="max-w-7xl mx-auto space-y-2">
           {/* Tag row */}
-          <div className="flex flex-wrap gap-1.5 items-center min-h-[28px]">
+          <div
+            className="flex flex-wrap gap-1.5 items-center min-h-[28px]"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={() => {
+              setDragTicker(null);
+              setDragOverTicker(null);
+            }}
+          >
             {tickers.map(t => (
-              <TickerTag key={t} ticker={t} onRemove={handleRemoveTicker} />
+              <TickerTag
+                key={t}
+                ticker={t}
+                onRemove={handleRemoveTicker}
+                onDragStart={handleDragStart}
+                onDragOver={handleDragOver}
+                onDrop={handleDropTicker}
+                dragging={dragTicker === t}
+              />
             ))}
             {tickers.length === 0 && (
               <span className="text-xs text-zinc-500 italic">No tickers — add some below</span>
