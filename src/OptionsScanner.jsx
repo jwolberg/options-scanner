@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 
 const PROXY_BASE = "http://localhost:3001";
 const DEFAULT_TICKERS = ["AAPL", "VIX", "KO", "META", "AMZN", "XOM", "GM", "MCD"];
@@ -24,11 +24,12 @@ async function saveTickers(tickers) {
 }
 
 async function fetchTicker(ticker) {
-  const [stateRes, explainRes] = await Promise.all([
+  const [stateRes, explainRes, msRes] = await Promise.all([
     fetch(`${PROXY_BASE}/tv/tickers/${ticker}`).then(r => r.json()),
     fetch(`${PROXY_BASE}/tv/tickers/${ticker}/explain`).then(r => r.json()),
+    fetch(`${PROXY_BASE}/tv/tickers/${ticker}/market-structure`).then(r => r.json()).catch(() => null),
   ]);
-  return { ticker, raw: stateRes, explain: explainRes };
+  return { ticker, raw: stateRes, explain: explainRes, ms: msRes };
 }
 
 function reorderList(list, fromIndex, toIndex) {
@@ -38,6 +39,16 @@ function reorderList(list, fromIndex, toIndex) {
   return copy;
 }
 
+function computeTier(m, ms) {
+  const msValid = ms && !ms.error;
+  const signal = ms?.data?.signal;
+  const hasSignal = msValid && signal && signal.toLowerCase() !== "neutral";
+
+  if (m.ivRank >= 60 && hasSignal && Math.abs(m.gammaFlipDist) < 3) return "READY";
+  if (m.ivRank >= 40 && hasSignal) return "SETUP FORMING";
+  if (m.ivRank >= 20) return "WATCH";
+  return "PASS";
+}
 
 async function askClaude(prompt) {
   const res = await fetch(`${PROXY_BASE}/anthropic`, {
@@ -298,12 +309,42 @@ function TickerTag({ ticker, onRemove, onDragStart, onDragOver, onDrop, dragging
   );
 }
 
+function SignalPill({ signal }) {
+  if (!signal) return null;
+  const s = signal.toLowerCase();
+  let cls = "bg-zinc-700/60 text-zinc-300";
+  if (s.includes("bullish") || s.includes("stabiliz")) cls = "bg-emerald-500/20 text-emerald-300";
+  else if (s.includes("bearish") || s.includes("fragile")) cls = "bg-red-500/20 text-red-300";
+  else if (s.includes("mixed") || s.includes("neutral")) cls = "bg-amber-500/20 text-amber-300";
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono uppercase tracking-wider ${cls}`}>
+      {signal}
+    </span>
+  );
+}
+
+function TierBadge({ tier }) {
+  if (tier === "PASS" || !tier) return null;
+  let cls = "bg-zinc-700/60 text-zinc-300";
+  if (tier === "READY") cls = "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30";
+  else if (tier === "SETUP FORMING") cls = "bg-amber-500/20 text-amber-300 border border-amber-500/30";
+  else if (tier === "WATCH") cls = "bg-zinc-700/60 text-zinc-400 border border-zinc-600/30";
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[9px] font-mono uppercase tracking-wider ${cls}`}>
+      {tier}
+    </span>
+  );
+}
+
 // ── Ticker Card ───────────────────────────────────────────────────────────────
 function TickerCard({ data, onSelect, selected }) {
-  const { ticker, explain } = data;
+  const { ticker, explain, ms } = data;
   const m = normalize(data.raw);
+  const msValid = ms && !ms.error;
+  const tier = computeTier(m, ms);
 
   const explainText =
+    (msValid ? ms?.data?.headline : null) ??
     (typeof explain === "string" ? explain : null) ??
     explain?.data?.summary ?? explain?.data?.bias ?? explain?.data?.explanation ??
     explain?.summary ?? explain?.bias ?? explain?.explanation ??
@@ -311,9 +352,15 @@ function TickerCard({ data, onSelect, selected }) {
 
   const pcrColor = m.pcrOI > 1.5 ? "text-red-300" : m.pcrOI < 0.8 ? "text-emerald-300" : "text-zinc-50";
 
+  const biasBorder = msValid
+    ? ms?.data?.bias === "upside"   ? "border-l-4 border-l-emerald-500"
+    : ms?.data?.bias === "downside" ? "border-l-4 border-l-red-500"
+    : ""
+    : "";
+
   return (
     <div onClick={() => onSelect(data)}
-      className={`relative cursor-pointer rounded-xl border transition-all duration-300 p-4 hover:scale-[1.01] ${
+      className={`relative cursor-pointer rounded-xl border transition-all duration-300 p-4 hover:scale-[1.01] ${biasBorder} ${
         selected ? "border-amber-400/60 bg-amber-400/5 shadow-lg shadow-amber-400/10"
                  : "border-zinc-800 bg-zinc-900/80 hover:border-zinc-700"
       }`}
@@ -324,9 +371,13 @@ function TickerCard({ data, onSelect, selected }) {
             <span className="font-black text-xl tracking-tight text-white font-mono">{ticker}</span>
             {m.price && <span className="text-sm font-mono text-zinc-200">${m.price.toFixed(2)}</span>}
           </div>
-          <RegimePill regime={m.regime} />
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <RegimePill regime={m.regime} />
+            {msValid && <SignalPill signal={ms?.data?.signal} />}
+          </div>
         </div>
         <div className="flex flex-col items-end gap-1">
+          <TierBadge tier={tier} />
           {m.iv !== null && (
             <div className="text-right">
               <div className="text-[10px] text-zinc-300">
@@ -485,6 +536,24 @@ Cover: positioning regime read, gamma exposure implications, skew signals, key r
   );
 }
 
+function filterCards(cards, mode) {
+  if (mode === "All") return cards;
+  return cards.filter(card => {
+    const m = normalize(card.raw);
+    const ms = card.ms;
+    const msValid = ms && !ms.error;
+    if (mode === "Ready") return computeTier(m, ms) === "READY";
+    if (mode === "Setup Forming") return computeTier(m, ms) === "SETUP FORMING";
+    if (mode === "High IVR") return m.ivRank >= 50;
+    if (mode === "Explosive") return typeof m.regime === "string" && m.regime.toLowerCase().includes("explos");
+    if (mode === "Fragile") {
+      return (msValid && ms?.data?.bias === "downside") ||
+             (msValid && typeof ms?.data?.signal === "string" && ms.data.signal.toLowerCase().includes("fragile"));
+    }
+    return true;
+  });
+}
+
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function OptionsScanner() {
   const [tickers, setTickers]           = useState(DEFAULT_TICKERS);
@@ -509,6 +578,8 @@ export default function OptionsScanner() {
 
   const [dragTicker, setDragTicker] = useState(null);
   const [dragOverTicker, setDragOverTicker] = useState(null);
+  const [filterMode, setFilterMode] = useState("All");
+  const visibleCards = useMemo(() => filterCards(tickerData, filterMode), [tickerData, filterMode]);
 
   const fetchKeyStatus = useCallback(async () => {
     try {
@@ -879,6 +950,26 @@ export default function OptionsScanner() {
         </div>
       )}
 
+      {/* Filter bar */}
+      <div className="border-b border-zinc-800 px-6 py-2 bg-zinc-900/30">
+        <div className="max-w-7xl mx-auto flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] text-zinc-400 uppercase tracking-widest shrink-0">Filter</span>
+          {["All", "Ready", "Setup Forming", "High IVR", "Explosive", "Fragile"].map(mode => (
+            <button
+              key={mode}
+              onClick={() => setFilterMode(mode)}
+              className={`px-2.5 py-1 rounded-full text-[11px] font-mono border transition-colors ${
+                filterMode === mode
+                  ? "border-amber-400/60 text-amber-400 bg-amber-400/10"
+                  : "border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-300 bg-transparent"
+              }`}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <main className="max-w-7xl mx-auto px-6 py-6">
         {tickerData.length === 0 && !loading && (
           <div className="text-center py-20 text-zinc-400">
@@ -886,8 +977,13 @@ export default function OptionsScanner() {
             <p className="text-sm">Add tickers above and they'll be saved for next time</p>
           </div>
         )}
+        {visibleCards.length === 0 && tickerData.length > 0 && !loading && (
+          <div className="text-center py-20 text-zinc-500">
+            <p className="text-sm">No tickers match <span className="text-amber-400">{filterMode}</span></p>
+          </div>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {tickerData.map(d => (
+          {visibleCards.map(d => (
             <TickerCard key={d.ticker} data={d} onSelect={setSelected} selected={selected?.ticker === d.ticker} />
           ))}
         </div>
