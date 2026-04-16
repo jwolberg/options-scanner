@@ -25,7 +25,7 @@ async function saveTickers(tickers) {
 
 async function fetchTicker(ticker) {
   const [stateRes, explainRes, msRes] = await Promise.all([
-    fetch(`${PROXY_BASE}/tv/tickers/${ticker}`).then(r => r.json()),
+    fetch(`${PROXY_BASE}/tv/tickers/${ticker}?trade_recommendation=true`).then(r => r.json()),
     fetch(`${PROXY_BASE}/tv/tickers/${ticker}/explain`).then(r => r.json()),
     fetch(`${PROXY_BASE}/tv/tickers/${ticker}/market-structure`).then(r => r.json()).catch(() => null),
   ]);
@@ -259,7 +259,7 @@ function OIBar({ callOI, putOI }) {
   );
 }
 
-function RegimePill({ regime }) {
+function StructurePill({ regime }) {
   if (!regime) return null;
   const r = regime.toLowerCase();
   let cls = "bg-zinc-700/40 text-zinc-200 border-zinc-400/30"; let icon = "◆";
@@ -280,7 +280,7 @@ function OpportunityScorePill({ score }) {
   if (score === null || score === undefined) return null;
   return (
     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/10 text-[10px] font-mono uppercase tracking-wider text-amber-300">
-      Score {score.toFixed(2)}
+      Score: {score.toFixed(2)}
     </span>
   );
 }
@@ -375,12 +375,12 @@ function TierBadge({ tier }) {
   );
 }
 
-function GammaRegimePill({ label }) {
+function RegimePill({ label }) {
   if (!label) return null;
   const display = formatLabel(label);
   return (
     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-fuchsia-500/30 bg-fuchsia-500/10 text-[10px] font-mono uppercase tracking-wider text-fuchsia-200">
-      Gamma {display}
+      Regime: {display}
     </span>
   );
 }
@@ -393,8 +393,18 @@ function DirectionPill({ direction }) {
   else if (d.includes("short")) cls = "bg-red-500/20 text-red-300 border border-red-500/30";
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded text-[9px] font-mono uppercase tracking-wider ${cls}`}>
-      {direction}
+      Direction: {formatLabel(direction)}
     </span>
+  );
+}
+
+function ContextStat({ label, value, accent = "text-zinc-100" }) {
+  if (!value) return null;
+  return (
+    <div className="rounded-md border border-zinc-800 bg-zinc-950/40 px-2 py-1">
+      <div className="text-[9px] uppercase tracking-widest text-zinc-500">{label}</div>
+      <div className={`text-[11px] font-mono ${accent}`}>{value}</div>
+    </div>
   );
 }
 
@@ -427,72 +437,68 @@ function TickerCard({ data, onSelect, selected }) {
                  : "border-zinc-800 bg-zinc-900/80 hover:border-zinc-700"
       }`}
     >
-      <div className="flex items-start justify-between mb-2">
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-baseline gap-2">
-            <span className="font-black text-xl tracking-tight text-white font-mono">{ticker}</span>
-            {m.price && <span className="text-sm font-mono text-zinc-200">${m.price.toFixed(2)}</span>}
+      <div className="mb-2">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-2">
+              <span className="font-black text-xl tracking-tight text-white font-mono">{ticker}</span>
+              {m.price && <span className="text-sm font-mono text-zinc-200">${m.price.toFixed(2)}</span>}
+            </div>
+            <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+              <OpportunityScorePill score={m.opportunityScore} />
+              <TierBadge tier={tier} />
+              <DirectionPill direction={m.tradeDirection} />
+              {m.tradeType && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-[9px] font-mono uppercase tracking-wider bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                  Strategy: {formatLabel(m.tradeType)}
+                </span>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <OpportunityScorePill score={m.opportunityScore} />
-            <GammaRegimePill label={m.gammaRegimeLabel} />
-            {msValid && <SignalPill signal={ms?.data?.signal} />}
+          <div className="shrink-0">
+            <SpecArc score={m.specScore} />
           </div>
         </div>
-        <div className="flex flex-col items-end gap-1">
-          <TierBadge tier={tier} />
-          <DirectionPill direction={m.tradeDirection} />
-          {m.opportunityScore !== null && (
-            <div className="text-right rounded-md border border-amber-500/20 bg-amber-500/10 px-2 py-1">
-              <div className="text-[9px] text-amber-200/80 uppercase tracking-widest">Score</div>
-              <div className="text-xl font-mono font-black text-amber-300 leading-none">
-                {m.opportunityScore.toFixed(2)}
-              </div>
-            </div>
-          )}
-          {m.iv !== null && (
-            <div className="text-right">
-              <div className="text-[10px] text-zinc-300">
-                IV ATM {m.ivRank !== null && <span className="text-amber-400/70 ml-1">IVR {m.ivRank.toFixed(0)}</span>}
-              </div>
-              <div className="text-xl font-mono font-black text-white leading-tight">
-                {(m.iv * 100).toFixed(1)}%
-                {m.ivChg1d !== null && (
-                  <span className={`text-xs ml-1 ${m.ivChg1d >= 0 ? "text-red-400" : "text-emerald-400"}`}>
-                    {m.ivChg1d >= 0 ? "+" : ""}{m.ivChg1d.toFixed(1)}%
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
-          <SpecArc score={m.specScore} />
-        </div>
-      </div>
 
-      {(m.opportunityScore !== null || m.tradeDirection || m.tradeType || m.tradeBias) && (
-        <div className="flex gap-1.5 flex-wrap mb-2">
-          {m.opportunityScore !== null && (
-            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
-              Score {m.opportunityScore.toFixed(2)}
-            </span>
-          )}
-          {m.tradeDirection && (
-            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-red-500/10 text-red-300 border border-red-500/20">
-              Direction {formatLabel(m.tradeDirection)}
-            </span>
-          )}
-          {m.tradeType && (
-            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
-              Type {formatLabel(m.tradeType)}
-            </span>
-          )}
-          {m.tradeBias && (
-            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-200">
-              Bias {m.tradeBias}
-            </span>
-          )}
+        {m.tradeBias && (
+          <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/50 px-2.5 py-2">
+            <div className="text-[9px] uppercase tracking-widest text-zinc-500 mb-1">Trade Thesis</div>
+            <p className="text-[12px] text-zinc-100 leading-snug">{m.tradeBias}</p>
+          </div>
+        )}
+
+        <div className="mt-2 flex gap-1.5 flex-wrap items-start">
+          <RegimePill label={m.gammaRegimeLabel} />
+          {/* {m.regime && <StructurePill regime={m.regime} />} */}
+          {msValid && ms?.data?.signal && <SignalPill signal={`Market Structure: ${ms.data.signal}`} />}
         </div>
-      )}
+
+        {(m.iv !== null || m.ivRank !== null || m.ivChg1d !== null || m.specScore !== null) && (
+          <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+            {(m.iv !== null || m.ivRank !== null) && (
+              <ContextStat
+                label="IV Context"
+                value={`${m.iv !== null ? `${(m.iv * 100).toFixed(1)}%` : "n/a"}${m.ivRank !== null ? `  IVR ${m.ivRank.toFixed(0)}` : ""}`}
+                accent="text-white"
+              />
+            )}
+            {m.ivChg1d !== null && (
+              <ContextStat
+                label="IV 1D Change"
+                value={`${m.ivChg1d >= 0 ? "+" : ""}${m.ivChg1d.toFixed(1)}%`}
+                accent={m.ivChg1d >= 0 ? "text-red-300" : "text-emerald-300"}
+              />
+            )}
+            {m.specScore !== null && (
+              <ContextStat
+                label="Call Speculation"
+                value={`${(Math.min(Math.max(m.specScore, 0), 1) * 100).toFixed(0)}%`}
+                accent="text-amber-300"
+              />
+            )}
+          </div>
+        )}
+      </div>
 
       {(m.em1d !== null || m.em1w !== null) && (
         <div className="flex gap-1.5 flex-wrap mb-2">
