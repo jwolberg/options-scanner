@@ -40,14 +40,7 @@ function reorderList(list, fromIndex, toIndex) {
 }
 
 function computeTier(m, ms) {
-  const msValid = ms && !ms.error;
-  const signal = ms?.data?.signal;
-  const hasSignal = msValid && signal && signal.toLowerCase() !== "neutral";
-
-  if (m.ivRank >= 60 && hasSignal && Math.abs(m.gammaFlipDist) < 3) return "READY";
-  if (m.ivRank >= 40 && hasSignal) return "SETUP FORMING";
-  if (m.ivRank >= 20) return "WATCH";
-  return "PASS";
+  return m.opportunityTier ?? null;
 }
 
 async function askClaude(prompt) {
@@ -88,15 +81,35 @@ function normalize(raw) {
   const dv = d.derived      ?? {};
   const em = d.expected_move ?? {};
   const gm = d.gamma        ?? {};
+  const ms = d.market_state ?? {};
   const ps = d.positioning  ?? {};
   const pc = ps.put_call    ?? {};
   const sk = ps.skew        ?? {};
+  const tr = d.trade_recommendation ?? {};
   const un = d.underlying   ?? {};
   const uiv = un.iv         ?? {};
 
   return {
     regime:       cf.regime ?? null,
     specScore:    cf.speculative_interest_score ?? null,
+    trendScore:   ms.trend?.score ?? null,
+    trendState:   ms.trend?.state ?? null,
+    momentumScore: ms.momentum?.score ?? null,
+    momentumState: ms.momentum?.state ?? null,
+    extensionScore: ms.extension?.score ?? null,
+    extensionState: ms.extension?.state ?? null,
+    realizedVolScore: ms.realized_vol?.score ?? null,
+    realizedVolState: ms.realized_vol?.state ?? null,
+    realizedVol20d: ms.realized_vol_20d ?? null,
+    trendAlignmentScore: ms.trend_alignment?.score ?? null,
+    trendAlignmentState:
+      ms.trend_alignment?.state
+        ? (
+            ms.trend_alignment.state === "conflicting" && (ms.trend_alignment?.score ?? 0) > 0 ? "aligned"
+            : ms.trend_alignment.state === "aligned" && (ms.trend_alignment?.score ?? 0) < 0 ? "conflicting"
+            : ms.trend_alignment.state
+          )
+        : null,
     iv:           uiv.atm_iv ?? null,
     ivRank:       uiv.iv_rank ?? null,
     ivChg1d:      uiv.iv_1d_pct_chg ?? null,
@@ -127,6 +140,12 @@ function normalize(raw) {
     skewRatio:    sk.put_call_iv_ratio_25delta  ?? null,
     skewSpread:   sk.put_call_iv_spread         ?? null,
     skewRefDte:   sk.skew_reference_dte_days    ?? null,
+    opportunityScore: tr.opportunity_score ?? null,
+    opportunityTier: tr.opportunity_tier ?? null,
+    tradeDirection: tr.direction ?? null,
+    gammaRegimeLabel: tr.regime_label ?? null,
+    tradeBias: tr.trade_bias ?? null,
+    tradeType: tr.trade_type ?? null,
     d,
   };
 }
@@ -142,6 +161,9 @@ function Bar({
   posColor,
   negColor,
   fmt,
+  labelClassName = "w-24",
+  trackClassName = "",
+  valueClassName = "w-16",
 }) {
   if (value === null || value === undefined) return null;
 
@@ -176,9 +198,9 @@ function Bar({
 
   return (
     <div className="flex items-center gap-2 py-0.5">
-      <span className="text-[11px] text-zinc-300 w-24 shrink-0">{label}</span>
+      <span className={`text-[11px] text-zinc-300 shrink-0 ${labelClassName}`}>{label}</span>
 
-      <div className="relative flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+      <div className={`relative flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden ${trackClassName}`}>
         {/* center marker */}
         <div className="absolute left-1/2 top-0 bottom-0 w-px bg-zinc-600/80 -translate-x-1/2" />
 
@@ -195,7 +217,7 @@ function Bar({
         )}
       </div>
 
-      <span className={`text-[11px] font-mono w-16 text-right ${textColor}`}>
+      <span className={`text-[11px] font-mono text-right ${textColor} ${valueClassName}`}>
         {display}
       </span>
     </div>
@@ -250,6 +272,15 @@ function RegimePill({ regime }) {
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-mono uppercase tracking-wider ${cls}`}>
       {icon} {regime}
+    </span>
+  );
+}
+
+function OpportunityScorePill({ score }) {
+  if (score === null || score === undefined) return null;
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/10 text-[10px] font-mono uppercase tracking-wider text-amber-300">
+      Score {score.toFixed(2)}
     </span>
   );
 }
@@ -323,15 +354,46 @@ function SignalPill({ signal }) {
   );
 }
 
+function formatLabel(value) {
+  if (!value) return null;
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+
 function TierBadge({ tier }) {
-  if (tier === "PASS" || !tier) return null;
+  if (!tier) return null;
+  const normalized = String(tier).toLowerCase();
   let cls = "bg-zinc-700/60 text-zinc-300";
-  if (tier === "READY") cls = "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30";
-  else if (tier === "SETUP FORMING") cls = "bg-amber-500/20 text-amber-300 border border-amber-500/30";
-  else if (tier === "WATCH") cls = "bg-zinc-700/60 text-zinc-400 border border-zinc-600/30";
+  if (normalized.includes("high")) cls = "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30";
+  else if (normalized.includes("moderate")) cls = "bg-amber-500/20 text-amber-300 border border-amber-500/30";
+  else if (normalized.includes("low")) cls = "bg-zinc-700/60 text-zinc-400 border border-zinc-600/30";
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded text-[9px] font-mono uppercase tracking-wider ${cls}`}>
-      {tier}
+      {formatLabel(tier)}
+    </span>
+  );
+}
+
+function GammaRegimePill({ label }) {
+  if (!label) return null;
+  const display = formatLabel(label);
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-fuchsia-500/30 bg-fuchsia-500/10 text-[10px] font-mono uppercase tracking-wider text-fuchsia-200">
+      Gamma {display}
+    </span>
+  );
+}
+
+function DirectionPill({ direction }) {
+  if (!direction) return null;
+  const d = direction.toLowerCase();
+  let cls = "bg-zinc-700/60 text-zinc-300";
+  if (d.includes("long")) cls = "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30";
+  else if (d.includes("short")) cls = "bg-red-500/20 text-red-300 border border-red-500/30";
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[9px] font-mono uppercase tracking-wider ${cls}`}>
+      {direction}
     </span>
   );
 }
@@ -372,12 +434,22 @@ function TickerCard({ data, onSelect, selected }) {
             {m.price && <span className="text-sm font-mono text-zinc-200">${m.price.toFixed(2)}</span>}
           </div>
           <div className="flex items-center gap-1.5 flex-wrap">
-            <RegimePill regime={m.regime} />
+            <OpportunityScorePill score={m.opportunityScore} />
+            <GammaRegimePill label={m.gammaRegimeLabel} />
             {msValid && <SignalPill signal={ms?.data?.signal} />}
           </div>
         </div>
         <div className="flex flex-col items-end gap-1">
           <TierBadge tier={tier} />
+          <DirectionPill direction={m.tradeDirection} />
+          {m.opportunityScore !== null && (
+            <div className="text-right rounded-md border border-amber-500/20 bg-amber-500/10 px-2 py-1">
+              <div className="text-[9px] text-amber-200/80 uppercase tracking-widest">Score</div>
+              <div className="text-xl font-mono font-black text-amber-300 leading-none">
+                {m.opportunityScore.toFixed(2)}
+              </div>
+            </div>
+          )}
           {m.iv !== null && (
             <div className="text-right">
               <div className="text-[10px] text-zinc-300">
@@ -397,12 +469,58 @@ function TickerCard({ data, onSelect, selected }) {
         </div>
       </div>
 
+      {(m.opportunityScore !== null || m.tradeDirection || m.tradeType || m.tradeBias) && (
+        <div className="flex gap-1.5 flex-wrap mb-2">
+          {m.opportunityScore !== null && (
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
+              Score {m.opportunityScore.toFixed(2)}
+            </span>
+          )}
+          {m.tradeDirection && (
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-red-500/10 text-red-300 border border-red-500/20">
+              Direction {formatLabel(m.tradeDirection)}
+            </span>
+          )}
+          {m.tradeType && (
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+              Type {formatLabel(m.tradeType)}
+            </span>
+          )}
+          {m.tradeBias && (
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-200">
+              Bias {m.tradeBias}
+            </span>
+          )}
+        </div>
+      )}
+
       {(m.em1d !== null || m.em1w !== null) && (
         <div className="flex gap-1.5 flex-wrap mb-2">
           {m.em1d  && <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-amber-300">1d ±{(m.em1d).toFixed(1)}%</span>}
           {m.em1w  && <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-amber-300/70">1w ±{(m.em1w).toFixed(1)}%</span>}
           {m.em30d && <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-amber-300/50">30d ±{(m.em30d).toFixed(1)}%</span>}
         </div>
+      )}
+
+      {(m.trendScore !== null || m.momentumScore !== null || m.extensionScore !== null || m.realizedVolScore !== null || m.trendAlignmentScore !== null) && (
+        <Section>
+          <div className="text-[10px] text-zinc-400 uppercase tracking-widest mb-1">Market State</div>
+          <Bar label={`Trend: ${m.trendState ?? ""}`.trim()} value={m.trendScore} min={-5} max={5}
+            fmt={() => ""} labelClassName="w-40" trackClassName="w-20 flex-none ml-auto" valueClassName="w-0" />
+          <Bar label={`Momentum: ${m.momentumState ?? ""}`.trim()} value={m.momentumScore} min={-5} max={5}
+            fmt={() => ""} labelClassName="w-40" trackClassName="w-20 flex-none ml-auto" valueClassName="w-0" />
+          <Bar label={`Extension: ${m.extensionState ?? ""}`.trim()} value={m.extensionScore} min={-5} max={5}
+            fmt={() => ""} labelClassName="w-40" trackClassName="w-20 flex-none ml-auto" valueClassName="w-0" />
+          <Bar label={`Realized Vol: ${m.realizedVolState ?? ""}`.trim()} value={m.realizedVolScore} min={-5} max={5}
+            fmt={() => ""} labelClassName="w-40" trackClassName="w-20 flex-none ml-auto" valueClassName="w-0" />
+          <Bar label={`Alignment: ${m.trendAlignmentState ?? ""}`.trim()} value={m.trendAlignmentScore} min={-5} max={5}
+            fmt={() => ""} labelClassName="w-40" trackClassName="w-20 flex-none ml-auto" valueClassName="w-0" />
+          <Row
+            label="20d Realized Vol"
+            value={m.realizedVol20d !== null ? `${(m.realizedVol20d * 100).toFixed(1)}%` : null}
+            color="text-zinc-100"
+          />
+        </Section>
       )}
 
       {(m.gammaFlipDist !== null || m.gammaNot1pct !== null) && (
@@ -488,9 +606,13 @@ function AIPanel({ data, onClose }) {
     const m = normalize(data.raw);
     const prompt = `Analyze live options data for ${data.ticker} (price: $${m.price ?? "n/a"}):
 
-REGIME: ${m.regime} | Spec Interest: ${m.specScore !== null ? (m.specScore*100).toFixed(0)+"%" : "n/a"}
+GAMMA REGIME: ${formatLabel(m.gammaRegimeLabel) ?? "n/a"}
+OPPORTUNITY: score=${m.opportunityScore ?? "n/a"} | tier=${formatLabel(m.opportunityTier) ?? "n/a"} | direction=${m.tradeDirection ?? "n/a"} | type=${formatLabel(m.tradeType) ?? "n/a"}
+TRADE BIAS: ${m.tradeBias ?? "n/a"}
+MARKET STATE: trend=${m.trendState ?? "n/a"} (${m.trendScore ?? "n/a"}) | momentum=${m.momentumState ?? "n/a"} (${m.momentumScore ?? "n/a"}) | extension=${m.extensionState ?? "n/a"} (${m.extensionScore ?? "n/a"}) | realized_vol=${m.realizedVolState ?? "n/a"} (${m.realizedVolScore ?? "n/a"}) | alignment=${m.trendAlignmentState ?? "n/a"} (${m.trendAlignmentScore ?? "n/a"}) | rv20=${m.realizedVol20d !== null ? (m.realizedVol20d*100).toFixed(1)+"%" : "n/a"}
+SPEC INTEREST: ${m.specScore !== null ? (m.specScore*100).toFixed(0)+"%" : "n/a"}
 IV: ${m.iv !== null ? (m.iv*100).toFixed(1)+"%" : "n/a"} | IVR: ${m.ivRank ?? "n/a"} | 1d chg: ${m.ivChg1d ?? "n/a"}%
-Expected Move: 1d=±${m.em1d !== null ? (m.em1d*100).toFixed(2)+"%" : "n/a"} | 1w=±${m.em1w !== null ? (m.em1w*100).toFixed(2)+"%" : "n/a"} | 30d=±${m.em30d !== null ? (m.em30d*100).toFixed(2)+"%" : "n/a"}
+Expected Move: 1d=±${m.em1d !== null ? m.em1d.toFixed(2)+"%" : "n/a"} | 1w=±${m.em1w !== null ? m.em1w.toFixed(2)+"%" : "n/a"} | 30d=±${m.em30d !== null ? m.em30d.toFixed(2)+"%" : "n/a"}
 Gamma Flip: $${m.gammaFlipPrice ?? "n/a"} (${m.gammaFlipDist !== null ? (m.gammaFlipDist > 0 ? "+" : "")+m.gammaFlipDist.toFixed(2)+"% away" : "n/a"})
 GEX per 1% move: ${m.gammaNot1pct !== null ? (m.gammaNot1pct/1e9).toFixed(2)+"B" : "n/a"}
 Max gamma strike: $${m.maxGammaStrike ?? "n/a"} | ${m.pctGammaExpiring !== null ? (m.pctGammaExpiring*100).toFixed(1)+"% expiring "+m.nearestExpiry : ""}
@@ -498,7 +620,7 @@ Skew (25Δ P/C ratio): ${m.skewRatio ?? "n/a"} | Spread: ${m.skewSpread ?? "n/a"
 PCR (OI): ${m.pcrOI ?? "n/a"} | PCR (Vol): ${m.pcrVol ?? "n/a"} | 30d chg: ${m.pcrChg30d ?? "n/a"}
 Call OI: ${m.callOI ? (m.callOI/1e6).toFixed(2)+"M" : "n/a"} | Put OI: ${m.putOI ? (m.putOI/1e6).toFixed(2)+"M" : "n/a"}
 
-Cover: positioning regime read, gamma exposure implications, skew signals, key risk, one specific trade idea with strikes/expiry. Be sharp.`;
+Cover: explain whether the engine recommendation makes sense, reconcile it with gamma/positioning/skew, identify the key invalidation, and give one specific trade idea with strikes/expiry. Be sharp.`;
 
     askClaude(prompt)
       .then(setAnalysis)
@@ -542,14 +664,14 @@ function filterCards(cards, mode) {
     const m = normalize(card.raw);
     const ms = card.ms;
     const msValid = ms && !ms.error;
-    if (mode === "Ready") return computeTier(m, ms) === "READY";
-    if (mode === "Setup Forming") return computeTier(m, ms) === "SETUP FORMING";
+    if (mode === "Top Opportunities") return ["high", "moderate"].includes(String(computeTier(m, ms) ?? "").toLowerCase());
+    if (mode === "Directional") return String(m.tradeDirection ?? "").toLowerCase() === "short";
+    if (mode === "Mean Reversion") return String(m.tradeType ?? "").toLowerCase() === "mean_reversion";
     if (mode === "High IVR") return m.ivRank >= 50;
-    if (mode === "Explosive") return typeof m.regime === "string" && m.regime.toLowerCase().includes("explos");
-    if (mode === "Fragile") {
-      return (msValid && ms?.data?.bias === "downside") ||
-             (msValid && typeof ms?.data?.signal === "string" && ms.data.signal.toLowerCase().includes("fragile"));
-    }
+    if (mode === "Conflicting") return m.trendAlignmentState === "conflicting";
+    if (mode === "Elevated Vol") return m.realizedVolState === "elevated";
+    if (mode === "Fragile") return (msValid && ms?.data?.bias === "downside") ||
+      (msValid && typeof ms?.data?.signal === "string" && ms.data.signal.toLowerCase().includes("fragile"));
     return true;
   });
 }
@@ -738,11 +860,11 @@ export default function OptionsScanner() {
     setSummarizing(true); setSummaryOpen(true); setAiSummary("");
     const lines = tickerData.map(d => {
       const m = normalize(d.raw);
-      return `${d.ticker} $${m.price??""}: regime=${m.regime} iv=${m.iv!==null?(m.iv*100).toFixed(1)+"%":"n/a"} ivr=${m.ivRank??""} em1d=${m.em1d!==null?"±"+(m.em1d*100).toFixed(1)+"%":"n/a"} gexFlip=${m.gammaFlipDist!==null?(m.gammaFlipDist>0?"+":"")+m.gammaFlipDist.toFixed(1)+"%":"n/a"} pcr=${m.pcrOI??""} skew=${m.skewRatio??""} spec=${m.specScore!==null?(m.specScore*100).toFixed(0)+"%":"n/a"}`;
+      return `${d.ticker} $${m.price ?? ""}: opp=${m.opportunityScore !== null ? m.opportunityScore.toFixed(2) : "n/a"} tier=${formatLabel(m.opportunityTier) ?? "n/a"} flow=${m.regime ?? "n/a"} gammaRegime=${formatLabel(m.gammaRegimeLabel) ?? "n/a"} dir=${m.tradeDirection ?? "n/a"} type=${formatLabel(m.tradeType) ?? "n/a"} trend=${m.trendState ?? "n/a"} momentum=${m.momentumState ?? "n/a"} rv=${m.realizedVolState ?? "n/a"} align=${m.trendAlignmentState ?? "n/a"} iv=${m.iv !== null ? (m.iv * 100).toFixed(1) + "%" : "n/a"} ivr=${m.ivRank ?? ""} em1d=${m.em1d !== null ? "±" + m.em1d.toFixed(1) + "%" : "n/a"} gexFlip=${m.gammaFlipDist !== null ? (m.gammaFlipDist > 0 ? "+" : "") + m.gammaFlipDist.toFixed(1) + "%" : "n/a"}`;
     });
     try {
       setAiSummary(await askClaude(
-        `Scan ${tickerData.length} tickers:\n${lines.join("\n")}\n\n1) Overall regime  2) Top 2-3 setups  3) Divergences  4) Key risks. Punchy.`
+        `Scan ${tickerData.length} tickers:\n${lines.join("\n")}\n\nRank the best setups from the opportunity output first. Then give 1) overall market regime 2) top 2-3 setups 3) divergences between flow/gamma/state 4) key risks. Punchy.`
       ));
     } catch (e) { setAiSummary("Error: " + e.message); }
     setSummarizing(false);
@@ -753,10 +875,7 @@ export default function OptionsScanner() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&family=Barlow+Condensed:wght@900&display=swap');
         .display { font-family: 'Barlow Condensed', sans-serif; }
-        @keyframes scan-line { 0%{transform:translateY(-100%);opacity:.5;} 100%{transform:translateY(100vh);opacity:0;} }
-        .scan-line { position:fixed;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,#fbbf24,transparent);animation:scan-line 4s linear infinite;pointer-events:none;z-index:10; }
       `}</style>
-      <div className="scan-line" />
 
       <header className="border-b border-zinc-800 py-4">
   <div className="max-w-7xl mx-auto px-6 flex items-center justify-between flex-wrap gap-4">
@@ -954,7 +1073,7 @@ export default function OptionsScanner() {
       <div className="border-b border-zinc-800 px-6 py-2 bg-zinc-900/30">
         <div className="max-w-7xl mx-auto flex items-center gap-2 flex-wrap">
           <span className="text-[10px] text-zinc-400 uppercase tracking-widest shrink-0">Filter</span>
-          {["All", "Ready", "Setup Forming", "High IVR", "Explosive", "Fragile"].map(mode => (
+          {["All", "Top Opportunities", "Directional", "Mean Reversion", "Conflicting", "Elevated Vol", "High IVR", "Fragile"].map(mode => (
             <button
               key={mode}
               onClick={() => setFilterMode(mode)}
@@ -1017,5 +1136,3 @@ export default function OptionsScanner() {
     </div>
   );
 }
-
-
